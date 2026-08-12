@@ -9,6 +9,7 @@
     "run_worker_first": ["/api/*"]
   },
   "observability": { "enabled": true },
+  "routes": [{ "pattern": "tiers.guidegather.com", "custom_domain": true }],
   // Public (non-secret) config. Secrets (DISCORD_CLIENT_SECRET, SESSION_SECRET)
   // are set with `wrangler secret put <NAME>` — never put them here.
   "vars": {
