@@ -23,8 +23,7 @@
     {
       "binding": "DB",
       "database_name": "neil-young-tiers",
-      // Replace with the id printed by: wrangler d1 create neil-young-tiers
-      "database_id": "REPLACE_WITH_D1_DATABASE_ID"
+      "database_id": "0cc78c01-6514-4a7e-bb87-14d23827e9c4"
     }
   ]
 }
