@@ -13,6 +13,41 @@ interface Draft {
   coverUrl: string | null;
 }
 
+// Apple blocks requests from datacenter IPs (including Cloudflare Workers), so the
+// worker proxy fails in production. iTunes supports JSONP, which lets the admin's
+// own browser query it directly — their residential IP is never blocked.
+function jsonpSearch(term: string): Promise<AlbumSearchResult[]> {
+  return new Promise((resolve, reject) => {
+    const cb = `itunes_cb_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
+    const script = document.createElement('script');
+    let done = false;
+    const finish = (fn: () => void) => {
+      if (done) return;
+      done = true;
+      delete (window as unknown as Record<string, unknown>)[cb];
+      script.remove();
+      fn();
+    };
+    (window as unknown as Record<string, unknown>)[cb] = (data: { results?: Array<Record<string, unknown>> }) => {
+      finish(() =>
+        resolve(
+          (data.results ?? []).map((r) => ({
+            title: (r.collectionName as string) ?? '',
+            artist: (r.artistName as string) ?? '',
+            year: typeof r.releaseDate === 'string' ? Number(r.releaseDate.slice(0, 4)) : null,
+            coverUrl:
+              typeof r.artworkUrl100 === 'string' ? r.artworkUrl100.replace('100x100', '600x600') : null,
+          }))
+        )
+      );
+    };
+    script.src = `https://itunes.apple.com/search?media=music&entity=album&limit=12&term=${encodeURIComponent(term)}&callback=${cb}`;
+    script.onerror = () => finish(() => reject(new Error('iTunes search failed')));
+    window.setTimeout(() => finish(() => reject(new Error('iTunes search timed out'))), 8000);
+    document.head.appendChild(script);
+  });
+}
+
 export default function AdminPanel({ albums, onChanged }: Props) {
   const nextWeek = albums.reduce((m, a) => Math.max(m, a.week), 0) + 1;
   const [q, setQ] = useState('');
@@ -29,7 +64,14 @@ export default function AdminPanel({ albums, onChanged }: Props) {
     setSearching(true);
     setError('');
     try {
-      setResults(await api.searchAlbums(q));
+      let found: AlbumSearchResult[] = [];
+      try {
+        found = await api.searchAlbums(q);
+      } catch {
+        // worker proxy unavailable — fall through to browser-side search
+      }
+      if (found.length === 0) found = await jsonpSearch(q);
+      setResults(found);
     } catch {
       setError('Search failed — you can still add the album manually.');
       setResults([]);
