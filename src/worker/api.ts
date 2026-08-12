@@ -5,8 +5,27 @@ import type { Album, Placement, Tier, UserList } from '../shared/types';
 import { requireAuth } from './auth';
 import { isAdmin, type AppContext } from './types';
 
+// Defense-in-depth CSRF check on top of the SameSite=Lax cookie: browsers
+// always attach an Origin header to cross-site mutations, so a present but
+// mismatched Origin is never legitimate. Absent Origin (curl etc.) passes
+// through to the auth check.
+const rejectCrossOrigin: MiddlewareHandler<AppContext> = async (c, next) => {
+  if (c.req.method !== 'GET' && c.req.method !== 'HEAD') {
+    const origin = c.req.header('Origin');
+    if (origin && origin !== new URL(c.req.url).origin) {
+      console.warn(`csrf: blocked ${c.req.method} ${c.req.path} from origin ${origin}`);
+      return c.json({ error: 'forbidden' }, 403);
+    }
+  }
+  await next();
+};
+
 const adminOnly: MiddlewareHandler<AppContext> = async (c, next) => {
-  if (!isAdmin(c.env, c.get('userId'))) return c.json({ error: 'forbidden' }, 403);
+  const uid = c.get('userId');
+  if (!isAdmin(c.env, uid)) {
+    console.warn(`auth: user ${uid} denied admin route ${c.req.method} ${c.req.path}`);
+    return c.json({ error: 'forbidden' }, 403);
+  }
   await next();
 };
 
@@ -24,6 +43,7 @@ function toAlbum(r: AlbumRow): Album {
 }
 
 export const apiRoutes = new Hono<AppContext>();
+apiRoutes.use('*', rejectCrossOrigin);
 apiRoutes.use('*', requireAuth);
 
 apiRoutes.get('/me', async (c) => {

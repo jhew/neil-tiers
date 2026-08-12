@@ -30,7 +30,10 @@ async function upsertUser(db: D1Database, id: string, nickname: string, avatarUr
 
 export const requireAuth: MiddlewareHandler<AppContext> = async (c, next) => {
   const uid = await verifySession(c.env.SESSION_SECRET, getCookie(c, SESSION_COOKIE));
-  if (!uid) return c.json({ error: 'unauthorized' }, 401);
+  if (!uid) {
+    console.warn(`auth: unauthenticated ${c.req.method} ${c.req.path}`);
+    return c.json({ error: 'unauthorized' }, 401);
+  }
   c.set('userId', uid);
   await next();
 };
@@ -58,9 +61,15 @@ authRoutes.get('/login', (c) => {
 
 authRoutes.get('/callback', async (c) => {
   const { code, state, error } = c.req.query();
-  if (error) return c.redirect('/?error=denied');
+  if (error) {
+    console.warn(`oauth: discord returned error "${error}"`);
+    return c.redirect('/?error=denied');
+  }
   const savedState = getCookie(c, STATE_COOKIE);
-  if (!code || !state || state !== savedState) return c.redirect('/?error=state');
+  if (!code || !state || state !== savedState) {
+    console.warn('oauth: missing or mismatched state parameter');
+    return c.redirect('/?error=state');
+  }
   deleteCookie(c, STATE_COOKIE, { path: '/' });
 
   const tokenRes = await fetch(`${DISCORD_API}/oauth2/token`, {
@@ -74,7 +83,10 @@ authRoutes.get('/callback', async (c) => {
       redirect_uri: redirectUri(c.req.url),
     }),
   });
-  if (!tokenRes.ok) return c.redirect('/?error=token');
+  if (!tokenRes.ok) {
+    console.warn(`oauth: token exchange failed with ${tokenRes.status}: ${(await tokenRes.text()).slice(0, 200)}`);
+    return c.redirect('/?error=token');
+  }
   const { access_token } = (await tokenRes.json()) as { access_token: string };
 
   // Membership check: 200 only if the user is in the configured guild.
@@ -82,7 +94,10 @@ authRoutes.get('/callback', async (c) => {
   const memberRes = await fetch(`${DISCORD_API}/users/@me/guilds/${c.env.DISCORD_GUILD_ID}/member`, {
     headers: { Authorization: `Bearer ${access_token}` },
   });
-  if (!memberRes.ok) return c.redirect('/?error=not_member');
+  if (!memberRes.ok) {
+    console.warn(`oauth: guild membership check failed with ${memberRes.status} — sign-in rejected`);
+    return c.redirect('/?error=not_member');
+  }
   const member = (await memberRes.json()) as {
     nick: string | null;
     avatar: string | null;
@@ -117,9 +132,18 @@ authRoutes.get('/logout', (c) => {
 });
 
 // Local development only: create a fake session without Discord.
-// Active only when DEV_FAKE_LOGIN=1 is set in .dev.vars (never in production vars).
+// Requires BOTH the DEV_FAKE_LOGIN=1 var (set via .dev.vars, never production
+// vars) AND a localhost hostname, so it stays inert in production even if the
+// var is ever set there by mistake.
 authRoutes.get('/dev-login', async (c) => {
-  if (c.env.DEV_FAKE_LOGIN !== '1') return c.notFound();
+  const { hostname } = new URL(c.req.url);
+  const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
+  if (c.env.DEV_FAKE_LOGIN !== '1' || !isLocalhost) {
+    if (c.env.DEV_FAKE_LOGIN === '1') {
+      console.warn(`auth: dev-login blocked on non-localhost host ${hostname} — remove DEV_FAKE_LOGIN from production vars`);
+    }
+    return c.notFound();
+  }
   const uid = c.req.query('uid') ?? 'dev-user-1';
   const name = c.req.query('name') ?? `Dev ${uid.slice(-4)}`;
   const avatar = `https://cdn.discordapp.com/embed/avatars/${uid.length % 6}.png`;
