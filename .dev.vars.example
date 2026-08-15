@@ -1,9 +1,13 @@
 # Copy to .dev.vars for local development (never committed).
 # Secrets in production are set with: wrangler secret put <NAME>
 
+DISCORD_CLIENT_ID=your-discord-application-id
 DISCORD_CLIENT_SECRET=your-discord-client-secret
+DISCORD_GUILD_ID=your-discord-server-id
+ADMIN_DISCORD_IDS=comma-separated-admin-discord-user-ids
 SESSION_SECRET=any-long-random-string-for-local-dev
 
 # LOCAL ONLY — enables /api/auth/dev-login so you can test without Discord.
-# Never set this in production vars.
-DEV_FAKE_LOGIN=1
+# Must be a random token of 16+ characters; requests must pass it as ?key=.
+# Never set this in production.
+DEV_FAKE_LOGIN=some-random-token-of-16-plus-chars

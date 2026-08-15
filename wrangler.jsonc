@@ -10,16 +10,10 @@
   },
   "observability": { "enabled": true },
   "routes": [{ "pattern": "tiers.guidegather.com", "custom_domain": true }],
-  // Public (non-secret) config. Secrets (DISCORD_CLIENT_SECRET, SESSION_SECRET)
-  // are set with `wrangler secret put <NAME>` — never put them here.
-  "vars": {
-    // Application ID from the Discord Developer Portal
-    "DISCORD_CLIENT_ID": "YOUR_DISCORD_CLIENT_ID",
-    // Right-click your Discord server icon → "Copy Server ID" (enable Developer Mode first)
-    "DISCORD_GUILD_ID": "YOUR_DISCORD_GUILD_ID",
-    // Comma-separated Discord user IDs allowed to add/edit/remove albums
-    "ADMIN_DISCORD_IDS": "YOUR_ADMIN_DISCORD_ID"
-  },
+  // All Discord configuration lives in Worker secrets (`wrangler secret put`)
+  // and, for local dev, in the gitignored .dev.vars — never in this file:
+  // DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, DISCORD_GUILD_ID,
+  // ADMIN_DISCORD_IDS, SESSION_SECRET.
   "d1_databases": [
     {
       "binding": "DB",

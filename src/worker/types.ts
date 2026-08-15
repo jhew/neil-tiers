@@ -15,7 +15,7 @@ export type AppContext = {
 };
 
 export function isAdmin(env: Env, userId: string): boolean {
-  return env.ADMIN_DISCORD_IDS.split(',')
+  return (env.ADMIN_DISCORD_IDS ?? '').split(',')
     .map((s) => s.trim())
     .filter(Boolean)
     .includes(userId);

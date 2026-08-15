@@ -14,13 +14,9 @@ Three pieces need manual clicks: the Discord application, the Cloudflare resourc
 
 No bot needs to be added to the server; the OAuth scopes (`identify guilds.members.read`) are enough, and only members of your server will be able to sign in.
 
-## 2. Fill in config
+## 2. Configuration values
 
-In [wrangler.jsonc](wrangler.jsonc), set:
-
-- `DISCORD_CLIENT_ID` — from step 1.2
-- `DISCORD_GUILD_ID` — from step 1.4
-- `ADMIN_DISCORD_IDS` — your user ID from step 1.5 (comma-separate to add co-admins)
+All Discord values live in Worker secrets (step 3) and, for local dev, in the gitignored `.dev.vars` — **never commit any of them to the repo**, which is public. `wrangler.jsonc` intentionally contains no Discord IDs.
 
 ## 3. Cloudflare resources
 
@@ -38,15 +34,29 @@ Paste the printed `database_id` into `wrangler.jsonc`, then:
 npm run db:migrate:remote
 ```
 
-Set the two secrets (paste the Discord client secret; for the session secret use any long random string):
+Set the five secrets (each command prompts for the value):
+
+```bash
+npx wrangler secret put DISCORD_CLIENT_ID
+```
 
 ```bash
 npx wrangler secret put DISCORD_CLIENT_SECRET
 ```
 
 ```bash
+npx wrangler secret put DISCORD_GUILD_ID
+```
+
+```bash
+npx wrangler secret put ADMIN_DISCORD_IDS
+```
+
+```bash
 npx wrangler secret put SESSION_SECRET
 ```
+
+Values: client ID + secret from step 1.2, guild ID from step 1.4, admin IDs from step 1.5 (comma-separated for co-admins), and any long random string for `SESSION_SECRET`.
 
 First deploy:
 
@@ -75,7 +85,7 @@ Remember to add that exact URL as a Discord redirect (step 1.3) if you picked a 
 npm install
 ```
 
-Copy `.dev.vars.example` to `.dev.vars`. For real Discord login locally, put the real `DISCORD_CLIENT_SECRET` in it; or keep `DEV_FAKE_LOGIN=1` and visit `http://localhost:5173/api/auth/dev-login?uid=test1&name=Tester` to fake a session without Discord.
+Copy `.dev.vars.example` to `.dev.vars` and fill in the Discord values. For real Discord login locally you need the real client ID/secret and guild ID; or set `DEV_FAKE_LOGIN` to a random 16+ character token and visit `http://localhost:5173/api/auth/dev-login?key=<that token>&uid=test1&name=Tester` to fake a session without Discord.
 
 ```bash
 npm run db:migrate:local

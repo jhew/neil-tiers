@@ -5,20 +5,33 @@ import type { Album, Placement, Tier, UserList } from '../shared/types';
 import { requireAuth } from './auth';
 import { isAdmin, type AppContext } from './types';
 
-// Defense-in-depth CSRF check on top of the SameSite=Lax cookie: browsers
-// always attach an Origin header to cross-site mutations, so a present but
-// mismatched Origin is never legitimate. Absent Origin (curl etc.) passes
-// through to the auth check.
-const rejectCrossOrigin: MiddlewareHandler<AppContext> = async (c, next) => {
+// CSRF defense in depth on top of the SameSite=Lax cookie:
+// 1. a present-but-mismatched Origin header is never legitimate;
+// 2. every mutation must carry a custom header, which cross-site HTML forms
+//    cannot set and cross-origin scripts cannot add without a CORS preflight
+//    (which this API never grants).
+const csrfProtections: MiddlewareHandler<AppContext> = async (c, next) => {
   if (c.req.method !== 'GET' && c.req.method !== 'HEAD') {
     const origin = c.req.header('Origin');
     if (origin && origin !== new URL(c.req.url).origin) {
       console.warn(`csrf: blocked ${c.req.method} ${c.req.path} from origin ${origin}`);
       return c.json({ error: 'forbidden' }, 403);
     }
+    if (c.req.header('X-Tiers-CSRF') !== '1') {
+      console.warn(`csrf: blocked ${c.req.method} ${c.req.path} without CSRF header`);
+      return c.json({ error: 'forbidden' }, 403);
+    }
   }
   await next();
 };
+
+function isValidHttpsUrl(value: string): boolean {
+  try {
+    return new URL(value).protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
 
 const adminOnly: MiddlewareHandler<AppContext> = async (c, next) => {
   const uid = c.get('userId');
@@ -43,7 +56,7 @@ function toAlbum(r: AlbumRow): Album {
 }
 
 export const apiRoutes = new Hono<AppContext>();
-apiRoutes.use('*', rejectCrossOrigin);
+apiRoutes.use('*', csrfProtections);
 apiRoutes.use('*', requireAuth);
 
 apiRoutes.get('/me', async (c) => {
@@ -150,8 +163,20 @@ apiRoutes.post('/albums', adminOnly, async (c) => {
   const title = body?.title?.trim();
   if (!title) return c.json({ error: 'title required' }, 400);
 
-  let week = body?.week;
-  if (typeof week !== 'number' || !Number.isFinite(week)) {
+  const year = body?.year ?? null;
+  if (year !== null && (!Number.isInteger(year) || year < 1900 || year > 2100)) {
+    return c.json({ error: 'year must be between 1900 and 2100' }, 400);
+  }
+  const coverUrl = body?.coverUrl ?? null;
+  if (coverUrl !== null && (typeof coverUrl !== 'string' || !isValidHttpsUrl(coverUrl))) {
+    return c.json({ error: 'coverUrl must be an https:// URL' }, 400);
+  }
+
+  let week: number;
+  if (typeof body?.week === 'number' && Number.isFinite(body.week)) {
+    week = Math.floor(body.week);
+    if (week < 1 || week > 100) return c.json({ error: 'week must be between 1 and 100' }, 400);
+  } else {
     const max = await c.env.DB.prepare('SELECT COALESCE(MAX(week), 0) AS w FROM albums').first<{ w: number }>();
     week = (max?.w ?? 0) + 1;
   }
@@ -160,10 +185,10 @@ apiRoutes.post('/albums', adminOnly, async (c) => {
   const res = await c.env.DB.prepare(
     'INSERT INTO albums (title, year, cover_url, week, added_at) VALUES (?1, ?2, ?3, ?4, ?5)'
   )
-    .bind(title, body?.year ?? null, body?.coverUrl ?? null, Math.floor(week), now)
+    .bind(title, year, coverUrl, week, now)
     .run();
   const id = res.meta.last_row_id;
-  return c.json({ id, title, year: body?.year ?? null, coverUrl: body?.coverUrl ?? null, week, addedAt: now });
+  return c.json({ id, title, year, coverUrl, week, addedAt: now });
 });
 
 apiRoutes.patch('/albums/:id', adminOnly, async (c) => {
@@ -187,8 +212,21 @@ apiRoutes.patch('/albums/:id', adminOnly, async (c) => {
   const title = body.title !== undefined ? body.title.trim() : existing.title;
   if (!title) return c.json({ error: 'title required' }, 400);
   const year = body.year !== undefined ? body.year : existing.year;
+  if (year !== null && (!Number.isInteger(year) || year < 1900 || year > 2100)) {
+    return c.json({ error: 'year must be between 1900 and 2100' }, 400);
+  }
   const coverUrl = body.coverUrl !== undefined ? body.coverUrl : existing.cover_url;
-  const week = body.week !== undefined && Number.isFinite(body.week) ? Math.floor(body.week) : existing.week;
+  if (coverUrl !== null && (typeof coverUrl !== 'string' || !isValidHttpsUrl(coverUrl))) {
+    return c.json({ error: 'coverUrl must be an https:// URL' }, 400);
+  }
+  let week = existing.week;
+  if (body.week !== undefined) {
+    if (typeof body.week !== 'number' || !Number.isFinite(body.week)) {
+      return c.json({ error: 'week must be a number' }, 400);
+    }
+    week = Math.floor(body.week);
+    if (week < 1 || week > 100) return c.json({ error: 'week must be between 1 and 100' }, 400);
+  }
 
   await c.env.DB.prepare('UPDATE albums SET title = ?1, year = ?2, cover_url = ?3, week = ?4 WHERE id = ?5')
     .bind(title, year, coverUrl, week, id)

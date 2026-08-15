@@ -6,8 +6,16 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+// Custom header required by the worker on every mutation (CSRF defense:
+// cross-site requests cannot set custom headers without a CORS preflight).
+const CSRF_HEADER = { 'X-Tiers-CSRF': '1' };
+
 function jsonInit(method: string, body: unknown): RequestInit {
-  return { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
+  return {
+    method,
+    headers: { 'Content-Type': 'application/json', ...CSRF_HEADER },
+    body: JSON.stringify(body),
+  };
 }
 
 export const api = {
@@ -20,5 +28,6 @@ export const api = {
     req<Album>('/api/albums', jsonInit('POST', album)),
   updateAlbum: (id: number, patch: Partial<Pick<Album, 'title' | 'year' | 'coverUrl' | 'week'>>) =>
     req<Album>(`/api/albums/${id}`, jsonInit('PATCH', patch)),
-  deleteAlbum: (id: number) => req<{ ok: boolean }>(`/api/albums/${id}`, { method: 'DELETE' }),
+  deleteAlbum: (id: number) =>
+    req<{ ok: boolean }>(`/api/albums/${id}`, { method: 'DELETE', headers: CSRF_HEADER }),
 };

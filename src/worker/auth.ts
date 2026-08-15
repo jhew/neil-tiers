@@ -8,8 +8,9 @@ const SESSION_COOKIE = 'ny_session';
 const STATE_COOKIE = 'ny_state';
 const DISCORD_API = 'https://discord.com/api/v10';
 
-function isHttps(url: string): boolean {
-  return new URL(url).protocol === 'https:';
+function isLocalhostUrl(url: string): boolean {
+  const { hostname } = new URL(url);
+  return hostname === 'localhost' || hostname === '127.0.0.1';
 }
 
 function redirectUri(reqUrl: string): string {
@@ -47,7 +48,8 @@ authRoutes.get('/login', (c) => {
     path: '/',
     maxAge: 600,
     sameSite: 'Lax',
-    secure: isHttps(c.req.url),
+    // Always Secure except plain-http local dev.
+    secure: !isLocalhostUrl(c.req.url),
   });
   const params = new URLSearchParams({
     client_id: c.env.DISCORD_CLIENT_ID,
@@ -121,7 +123,7 @@ authRoutes.get('/callback', async (c) => {
     path: '/',
     maxAge: 30 * 86_400,
     sameSite: 'Lax',
-    secure: isHttps(c.req.url),
+    secure: !isLocalhostUrl(c.req.url),
   });
   return c.redirect('/');
 });
@@ -132,16 +134,15 @@ authRoutes.get('/logout', (c) => {
 });
 
 // Local development only: create a fake session without Discord.
-// Requires BOTH the DEV_FAKE_LOGIN=1 var (set via .dev.vars, never production
-// vars) AND a localhost hostname, so it stays inert in production even if the
-// var is ever set there by mistake.
+// DEV_FAKE_LOGIN (set via .dev.vars, never in production) must hold a random
+// token of 16+ chars, and the request must present it as ?key=. A hostname
+// check can't distinguish local from production here because `wrangler dev`
+// simulates the production route's hostname; requiring a secret token means
+// even a stray var in production opens nothing without the exact value.
 authRoutes.get('/dev-login', async (c) => {
-  const { hostname } = new URL(c.req.url);
-  const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
-  if (c.env.DEV_FAKE_LOGIN !== '1' || !isLocalhost) {
-    if (c.env.DEV_FAKE_LOGIN === '1') {
-      console.warn(`auth: dev-login blocked on non-localhost host ${hostname} — remove DEV_FAKE_LOGIN from production vars`);
-    }
+  const devKey = c.env.DEV_FAKE_LOGIN;
+  if (!devKey || devKey.length < 16 || c.req.query('key') !== devKey) {
+    if (devKey) console.warn('auth: dev-login attempt rejected (missing, short, or mismatched key)');
     return c.notFound();
   }
   const uid = c.req.query('uid') ?? 'dev-user-1';
